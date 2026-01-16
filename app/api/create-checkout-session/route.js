@@ -29,32 +29,3 @@ export async function POST(request) {
     );
   }
 }
-```
-
-6. **Save**
-
----
-
-## ✅ **Part C: Verify Your File Structure**
-
-Your project should now look like this:
-```
-proofly/
-├── app/
-│   ├── api/
-│   │   ├── analyze/
-│   │   │   └── route.js ✅
-│   │   └── create-checkout-session/
-│   │       └── route.js ✅
-│   ├── favicon.ico
-│   ├── globals.css
-│   ├── layout.js ✅
-│   └── page.js ✅
-├── components/
-│   ├── AnalysisResults.js ✅
-│   ├── AnalyzingState.js ✅
-│   └── LandingPage.js ✅
-├── lib/
-├── public/
-├── .env.local ✅
-└── package.json
