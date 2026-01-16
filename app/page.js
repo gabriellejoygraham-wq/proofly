@@ -1,9 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import LandingPage from '@/components/LandingPage';
-import AnalyzingState from '@/components/AnalyzingState';
-import AnalysisResults from '@/components/AnalysisResults';
+import LandingPage from '../components/LandingPage';
+import AnalyzingState from '../components/AnalyzingState';
+import AnalysisResults from '../components/AnalysisResults';
 
 export default function Home() {
   const [view, setView] = useState('landing');
