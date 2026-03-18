@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import axios from 'axios';
+import { detectClaimType, extractRedFlags } from '../../../lib/claimDetection';
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
@@ -34,7 +35,7 @@ async function searchClaim(query) {
 
 export async function POST(request) {
   try {
-    const { text } = await request.json();
+    const { text, claimType } = await request.json();
 
     if (!text || text.trim().length < 10) {
       return NextResponse.json(
@@ -43,10 +44,23 @@ export async function POST(request) {
       );
     }
 
+    // Detect claim type if not provided
+    const detectedType = claimType ? { type: claimType } : detectClaimType(text);
+    const typeAdjustment = detectedType?.promptAdjustment || '';
+
     // Step 1: Extract claims using Claude
     const claimExtractionPrompt = `Extract 3-8 specific, verifiable claims from this text. Return ONLY a JSON array of claims, no explanation.
 
 Text: "${text}"
+
+${typeAdjustment}
+
+Focus on extracting:
+- Specific monetary amounts or income claims
+- Professional credentials or titles
+- Client/customer numbers
+- Press mentions or awards
+- Concrete achievements
 
 Example format: ["claim 1", "claim 2", "claim 3"]`;
 
@@ -68,16 +82,20 @@ Example format: ["claim 1", "claim 2", "claim 3"]`;
       extractedClaims.slice(0, 5).map(claim => searchClaim(claim))
     );
 
-    // Step 3: Analyze with search results
-    const analysisPrompt = `You are Proofly, a credibility analysis tool. Analyze these claims with search results.
+    // Step 3: Analyze with search results and claim type context
+    const analysisPrompt = `You are Proofly, a credibility analysis tool built for social media claims (TikTok, Instagram, influencer bios).
 
-CLAIMS:
+CLAIM TYPE: ${detectedType?.type || 'general'}
+
+${typeAdjustment}
+
+CLAIMS TO ANALYZE:
 ${extractedClaims.map((c, i) => `${i + 1}. ${c}`).join('\n')}
 
 SEARCH RESULTS:
 ${searchResults.map((results, i) => `
-Claim ${i + 1} results:
-${results.slice(0, 3).map(r => `- ${r.title}: ${r.description || ''}`).join('\n')}
+Claim ${i + 1} search results:
+${results.slice(0, 3).map(r => `- ${r.title}: ${r.description || ''}`).join('\n') || 'No results found'}
 `).join('\n')}
 
 Return ONLY a JSON object with this structure:
@@ -89,22 +107,39 @@ Return ONLY a JSON object with this structure:
       "claim": "<claim text>",
       "status": "<verified|partial|unsupported>",
       "finding": "<calm, declarative assessment>",
-      "sources": ["<source1>"] or []
+      "sources": ["<source1>"] or [],
+      "pattern": "<optional: type of scam pattern detected>"
     }
   ],
-  "languageFlags": ["<flag1>"],
-  "alternatives": []
+  "languageFlags": ["<flag1>", "<flag2>"],
+  "topFindings": ["<finding1>", "<finding2>", "<finding3>"]
 }
 
-Rules:
-- Use calm, professional language
-- No dramatic statements
-- Be realistic about public verifiability
-- Include sources when search results support claims`;
+CRITICAL INSTRUCTIONS:
+1. Use calm, professional language - never accusatory
+2. Be realistic about what can be verified publicly
+3. For money claims: flag specific amounts without proof
+4. For health claims: note lack of clinical evidence
+5. For authority claims: check for vague credentials
+6. For influencer claims: verify press mentions (editorial vs contributor)
+7. Identify common scam patterns:
+   - Vague quantifiers ("10,000+ clients")
+   - Urgency language ("limited time", "act now")
+   - Unverifiable income claims
+   - Generic expertise without proof
+8. In "pattern" field, identify scam type if detected:
+   - "Specific monetary claim without proof"
+   - "Exaggerated scale claim"
+   - "Authority claim lacks specificity"
+   - "Vague proof phrase"
+   - "Unverifiable testimonial count"
+9. In "topFindings", provide 3 concise bullet points summarizing key issues
+
+Return ONLY valid JSON, no markdown.`;
 
     const analysisResponse = await anthropic.messages.create({
       model: 'claude-sonnet-4-20250514',
-      max_tokens: 2000,
+      max_tokens: 2500,
       messages: [{
         role: 'user',
         content: analysisPrompt
@@ -144,6 +179,9 @@ Rules:
              'Unsupported'
     }));
 
+    // Extract red flags
+    const redFlags = extractRedFlags(enrichedClaims, analysis.languageFlags || []);
+
     return NextResponse.json({
       text,
       overallScore: analysis.overallScore,
@@ -153,6 +191,9 @@ Rules:
       scoreBorder,
       claims: enrichedClaims,
       languageFlags: analysis.languageFlags || [],
+      topFindings: analysis.topFindings || [],
+      redFlags: redFlags,
+      claimType: detectedType,
       alternatives: analysis.alternatives || []
     });
 

@@ -1,25 +1,73 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import LandingPage from '../components/LandingPage';
 import AnalyzingState from '../components/AnalyzingState';
 import AnalysisResults from '../components/AnalysisResults';
+import { detectClaimType } from '../lib/claimDetection';
 
 export default function Home() {
   const [view, setView] = useState('landing');
   const [inputText, setInputText] = useState('');
   const [analysis, setAnalysis] = useState(null);
   const [analyzing, setAnalyzing] = useState(false);
+  const [detectedType, setDetectedType] = useState(null);
+  const [clipboardText, setClipboardText] = useState('');
+  const [showClipboardPrompt, setShowClipboardPrompt] = useState(false);
+
+  // Check clipboard on mount (mobile-friendly)
+  useEffect(() => {
+    const checkClipboard = async () => {
+      try {
+        // Only check if no text entered yet
+        if (!inputText && view === 'landing') {
+          // Simple check - don't actually read yet
+          setShowClipboardPrompt(true);
+        }
+      } catch (err) {
+        console.log('Clipboard not available');
+      }
+    };
+
+    checkClipboard();
+  }, [view]);
+
+  // Detect claim type as user types
+  useEffect(() => {
+    if (inputText.length > 20) {
+      setDetectedType(detectClaimType(inputText));
+    } else {
+      setDetectedType(null);
+    }
+  }, [inputText]);
+
+  const handlePasteFromClipboard = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text) {
+        setInputText(text);
+        setShowClipboardPrompt(false);
+      }
+    } catch (err) {
+      console.error('Failed to read clipboard:', err);
+      setShowClipboardPrompt(false);
+    }
+  };
 
   const handleAnalyze = async (text) => {
     setAnalyzing(true);
     setView('analyzing');
     
     try {
+      const claimType = detectClaimType(text);
+      
       const response = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text })
+        body: JSON.stringify({ 
+          text,
+          claimType: claimType?.type 
+        })
       });
 
       const data = await response.json();
@@ -43,6 +91,7 @@ export default function Home() {
     setView('landing');
     setInputText('');
     setAnalysis(null);
+    setDetectedType(null);
   };
 
   if (view === 'landing') {
@@ -51,12 +100,16 @@ export default function Home() {
         inputText={inputText}
         setInputText={setInputText}
         onAnalyze={handleAnalyze}
+        detectedType={detectedType}
+        showClipboardPrompt={showClipboardPrompt}
+        onPasteFromClipboard={handlePasteFromClipboard}
+        onDismissClipboard={() => setShowClipboardPrompt(false)}
       />
     );
   }
 
   if (view === 'analyzing') {
-    return <AnalyzingState />;
+    return <AnalyzingState detectedType={detectedType} />;
   }
 
   if (view === 'results' && analysis) {
